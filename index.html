@@ -141,9 +141,26 @@ header p{color:rgba(255,255,255,0.45);margin-top:4px;font-size:.95rem;}
 .btn-row .btn{width:auto;padding:13px 44px;font-size:1rem;}
 
 /* RESULT */
+.showdown-row{margin-bottom:1.8rem;}
+.showdown-label{font-size:.8rem;color:rgba(255,255,255,0.45);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;text-align:left;}
+.showdown-label span{color:#fff;font-weight:600;font-size:.9rem;text-transform:none;letter-spacing:0;}
+.showdown-label .hand-tag{color:#f0b429;font-weight:700;margin-left:6px;}
+.mini-cards{display:flex;gap:6px;justify-content:center;flex-wrap:nowrap;overflow:visible;}
+.mini-card{
+  width:54px;height:76px;border-radius:7px;
+  background:#ffffff !important;border:1.5px solid #ddd;
+  display:flex;flex-direction:column;padding:4px;
+  flex-shrink:0;color:#111;box-shadow:0 2px 8px rgba(0,0,0,0.3);
+}
+.mini-card.red{color:#c0392b !important;}
+.mini-card .mc-corner{display:flex;flex-direction:column;align-items:center;line-height:1.1;}
+.mini-card .mc-corner.bl{align-self:flex-end;transform:rotate(180deg);}
+.mini-card .mc-rank{font-size:.65rem;font-weight:800;}
+.mini-card .mc-suit{font-size:.55rem;}
+.mini-card .mc-center{flex:1;display:flex;align-items:center;justify-content:center;font-size:1.4rem;}
 .result-wrap{
   background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);
-  border-radius:20px;padding:3rem 2rem;max-width:480px;margin:0 auto;text-align:center;
+  border-radius:20px;padding:2rem 1.5rem;max-width:560px;margin:0 auto;text-align:center;
 }
 .trophy{font-size:4rem;margin-bottom:.6rem;}
 .result-wrap h2{font-size:1.9rem;font-weight:700;margin-bottom:.4rem;}
@@ -203,13 +220,14 @@ header p{color:rgba(255,255,255,0.45);margin-top:4px;font-size:.95rem;}
       <div class="trophy">🏆</div>
       <h2 id="winner-name"></h2>
       <p class="result-sub" id="winner-sub"></p>
-      <div class="score-rows" id="score-rows"></div>
+      <div id="showdown-rows"></div>
       <button class="btn" id="again-btn">Play Again</button>
     </div>
   </div>
 
 </div>
 <script>
+// ── DECK ─────────────────────────────────────────────────────────────────────
 // ── DECK ─────────────────────────────────────────────────────────────────────
 const SUITS=[{s:'♠',r:false},{s:'♥',r:true},{s:'♦',r:true},{s:'♣',r:false}];
 const RANKS=['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
@@ -226,41 +244,86 @@ function shuffle(a){
   return a;
 }
 
-// ── EVAL ─────────────────────────────────────────────────────────────────────
-function evalHand(cards){
-  if(!cards||cards.length<1) return{rank:-1,name:'—',tiebreak:[]};
-  const vals=cards.map(c=>c.v).sort((a,b)=>a-b);
-  const suits=cards.map(c=>c.s);
-  const rc={};for(const v of vals)rc[v]=(rc[v]||0)+1;
-  // groups sorted by count desc then value desc — gives us pairs/trips first, then kickers
-  const groups=Object.entries(rc).map(([v,c])=>({v:+v,c}));
-  groups.sort((a,b)=>b.c-a.c||b.v-a.v);
-  const tiebreak=groups.map(g=>g.v);
-  const counts=groups.map(g=>g.c);
-  const flush=cards.length>=5&&suits.every(s=>s===suits[0]);
-  const uniq=new Set(vals);
-  const straight=(uniq.size===5&&vals[4]-vals[0]===4)||(uniq.size===5&&JSON.stringify(vals)==='[2,3,4,5,14]');
-  if(straight&&flush)   return{rank:8,name:'Straight Flush',tiebreak};
-  if(counts[0]===4)     return{rank:7,name:'Four of a Kind',tiebreak};
-  if(counts[0]===3&&counts[1]===2)return{rank:6,name:'Full House',tiebreak};
-  if(flush)             return{rank:5,name:'Flush',tiebreak};
-  if(straight)          return{rank:4,name:'Straight',tiebreak};
-  if(counts[0]===3)     return{rank:3,name:'Three of a Kind',tiebreak};
-  if(counts[0]===2&&counts[1]===2)return{rank:2,name:'Two Pair',tiebreak};
-  if(counts[0]===2)     return{rank:1,name:'One Pair',tiebreak};
-  const highCard=cards.reduce((a,b)=>a.v>b.v?a:b);
-  return{rank:0,name:'High Card ('+highCard.r+' high)',tiebreak};
-}
+// ── POKER EVALUATOR — best 5-card hand out of N cards ────────────────────────
 
-// compare two evaluated hands — 1 if a wins, -1 if b wins, 0 if true tie
-function compareHands(a,b){
+function cmpScore(a,b){
   if(a.rank!==b.rank) return a.rank>b.rank?1:-1;
-  for(let i=0;i<Math.max(a.tiebreak.length,b.tiebreak.length);i++){
-    const av=a.tiebreak[i]||0, bv=b.tiebreak[i]||0;
+  for(let i=0;i<5;i++){
+    const av=(a.tiebreak[i]||0), bv=(b.tiebreak[i]||0);
     if(av!==bv) return av>bv?1:-1;
   }
   return 0;
 }
+
+// Score exactly 5 cards — returns result WITH bestCards already set
+function score5(combo){
+  const h=combo;
+  const vals=h.map(c=>c.v).sort((a,b)=>a-b);
+  const suits=h.map(c=>c.s);
+  const rc={};
+  for(const v of vals) rc[v]=(rc[v]||0)+1;
+  const groups=Object.entries(rc).map(([v,cnt])=>({v:+v,c:cnt}));
+  groups.sort((a,b)=>b.c-a.c||b.v-a.v);
+  const tb=groups.map(g=>g.v);
+  const counts=groups.map(g=>g.c);
+  const isFlush=suits.every(s=>s===suits[0]);
+  const uniq=[...new Set(vals)].sort((a,b)=>a-b);
+  const isWheel=(uniq.length===5 && uniq[0]===2 && uniq[1]===3 && uniq[2]===4 && uniq[3]===5 && uniq[4]===14);
+  const isStraight=(uniq.length===5 && (uniq[4]-uniq[0]===4 || isWheel));
+  const strTop=isWheel?5:uniq[uniq.length-1];
+  const bc=[...combo]; // copy so it can't be mutated away
+  if(isStraight&&isFlush) return{rank:8,name:'Straight Flush',tiebreak:[strTop],bestCards:bc};
+  if(counts[0]===4)        return{rank:7,name:'Four of a Kind',tiebreak:tb,bestCards:bc};
+  if(counts[0]===3&&counts[1]===2) return{rank:6,name:'Full House',tiebreak:tb,bestCards:bc};
+  if(isFlush)              return{rank:5,name:'Flush',tiebreak:[...vals].reverse(),bestCards:bc};
+  if(isStraight)           return{rank:4,name:'Straight',tiebreak:[strTop],bestCards:bc};
+  if(counts[0]===3)        return{rank:3,name:'Three of a Kind',tiebreak:tb,bestCards:bc};
+  if(counts[0]===2&&counts[1]===2) return{rank:2,name:'Two Pair',tiebreak:tb,bestCards:bc};
+  if(counts[0]===2)        return{rank:1,name:'One Pair',tiebreak:tb,bestCards:bc};
+  return{rank:0,name:'High Card',tiebreak:[...vals].reverse(),bestCards:bc};
+}
+
+// All C(n,5) combinations of arr
+function combos5(arr){
+  const out=[];
+  const n=arr.length;
+  for(let a=0;a<n-4;a++)
+  for(let b=a+1;b<n-3;b++)
+  for(let c=b+1;c<n-2;c++)
+  for(let d=c+1;d<n-1;d++)
+  for(let e=d+1;e<n;e++)
+    out.push([arr[a],arr[b],arr[c],arr[d],arr[e]]);
+  return out;
+}
+
+// Best 5-card hand from N cards — always returns bestCards
+function evalHand(cards){
+  if(!cards||cards.length===0) return{rank:-1,name:'—',tiebreak:[],bestCards:[]};
+  if(cards.length<5){
+    // fewer than 5 cards — just show what we have, no hand name yet
+    const vals=cards.map(c=>c.v).sort((a,b)=>a-b);
+    const rc={};for(const v of vals)rc[v]=(rc[v]||0)+1;
+    const groups=Object.entries(rc).map(([v,cnt])=>({v:+v,c:cnt}));
+    groups.sort((a,b)=>b.c-a.c||b.v-a.v);
+    const counts=groups.map(g=>g.c);
+    let name='—';
+    if(counts[0]===2&&counts[1]===2) name='Two Pair';
+    else if(counts[0]===3) name='Three of a Kind';
+    else if(counts[0]===4) name='Four of a Kind';
+    else if(counts[0]===2) name='Pair';
+    else name='';
+    return{rank:-1,name,tiebreak:[],bestCards:[...cards]};
+  }
+  const all=combos5(cards);
+  let best=score5(all[0]);
+  for(let i=1;i<all.length;i++){
+    const s=score5(all[i]);
+    if(cmpScore(s,best)>0) best=s;
+  }
+  return best; // bestCards is already inside best from score5
+}
+
+function compareHands(a,b){ return cmpScore(a,b); }
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let players, curPlayer, flipped;
@@ -345,8 +408,10 @@ function peel(idx){
     if(left>0){
       $('instruction').textContent=`${left} card${left>1?'s':''} left — keep peeling!`;
     } else {
-      p.hand=ev;
-      $('instruction').textContent=`Final hand: ${ev.name}`;
+      // Re-evaluate with all 10 to guarantee bestCards is set
+      const allCards=[...flipped].map(i=>p.cards[i]);
+      p.hand=evalHand(allCards);
+      $('instruction').textContent=`Final hand: ${p.hand.name}`;
       const isLast=curPlayer===players.length-1;
       $('action-btn').textContent=isLast?'See Results 🏆':`${players[1].name}'s Turn →`;
       $('btn-row').style.display='flex';
@@ -363,6 +428,16 @@ $('action-btn').addEventListener('click',()=>{
   }
 });
 
+function miniCard(c){
+  if(!c||!c.r) return '<div class="mini-card" style="background:#333;"></div>';
+  const isRed=(c.s==='♥'||c.s==='♦');
+  return `<div class="mini-card${isRed?' red':''}" style="background:#fff;">
+    <div class="mc-corner"><div class="mc-rank">${c.r}</div><div class="mc-suit">${c.s}</div></div>
+    <div class="mc-center">${c.s}</div>
+    <div class="mc-corner bl"><div class="mc-rank">${c.r}</div><div class="mc-suit">${c.s}</div></div>
+  </div>`;
+}
+
 function showResult(){
   const [p1,p2]=players;
   const cmp=compareHands(p1.hand,p2.hand);
@@ -371,16 +446,18 @@ function showResult(){
   const loser=cmp>0?p2:p1;
   $('winner-name').textContent=tie?"It's a Tie!":winner.name+" Wins!";
   $('winner-sub').textContent=tie
-    ?`Both got ${p1.hand.name} — identical strength`
+    ?`Both had ${p1.hand.name} — identical strength`
     :`${winner.hand.name} beats ${loser.hand.name}`;
   const sorted=[...players].sort((a,b)=>compareHands(b.hand,a.hand));
-  $('score-rows').innerHTML=sorted.map((p)=>`
-    <div class="score-row ${(!tie&&p===winner)?"winner":""}">
-      <div>
-        <div class="sr-name">${(!tie&&p===winner)?"🏆 ":""}${p.name}</div>
-        <div class="sr-hand">${p.hand.name}</div>
-      </div>
-    </div>`).join('');
+  $('showdown-rows').innerHTML=sorted.map((p)=>{
+    const isWinner=!tie&&p===winner;
+    const cards=(p.hand&&p.hand.bestCards)||[];
+    console.log(p.name,'bestCards:',cards.length, cards.map(c=>c&&c.r+c.s));
+    return `<div class="showdown-row">
+      <div class="showdown-label">${isWinner?'🏆 ':''}<span>${p.name}</span><span class="hand-tag">${p.hand.name}</span></div>
+      <div class="mini-cards">${cards.map(c=>miniCard(c)).join('')}</div>
+    </div>`;
+  }).join('');
   show('result');
 }
 
