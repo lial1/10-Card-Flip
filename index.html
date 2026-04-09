@@ -228,23 +228,38 @@ function shuffle(a){
 
 // ── EVAL ─────────────────────────────────────────────────────────────────────
 function evalHand(cards){
-  if(!cards||cards.length<1) return{rank:-1,name:'—'};
+  if(!cards||cards.length<1) return{rank:-1,name:'—',tiebreak:[]};
   const vals=cards.map(c=>c.v).sort((a,b)=>a-b);
   const suits=cards.map(c=>c.s);
   const rc={};for(const v of vals)rc[v]=(rc[v]||0)+1;
-  const counts=Object.values(rc).sort((a,b)=>b-a);
+  // groups sorted by count desc then value desc — gives us pairs/trips first, then kickers
+  const groups=Object.entries(rc).map(([v,c])=>({v:+v,c}));
+  groups.sort((a,b)=>b.c-a.c||b.v-a.v);
+  const tiebreak=groups.map(g=>g.v);
+  const counts=groups.map(g=>g.c);
   const flush=cards.length>=5&&suits.every(s=>s===suits[0]);
   const uniq=new Set(vals);
   const straight=(uniq.size===5&&vals[4]-vals[0]===4)||(uniq.size===5&&JSON.stringify(vals)==='[2,3,4,5,14]');
-  if(straight&&flush)   return{rank:8,name:'Straight Flush'};
-  if(counts[0]===4)     return{rank:7,name:'Four of a Kind'};
-  if(counts[0]===3&&counts[1]===2)return{rank:6,name:'Full House'};
-  if(flush)             return{rank:5,name:'Flush'};
-  if(straight)          return{rank:4,name:'Straight'};
-  if(counts[0]===3)     return{rank:3,name:'Three of a Kind'};
-  if(counts[0]===2&&counts[1]===2)return{rank:2,name:'Two Pair'};
-  if(counts[0]===2)     return{rank:1,name:'One Pair'};
-  return{rank:0,name:'High Card ('+RANKS[RANKS.indexOf(cards.reduce((a,b)=>a.v>b.v?a:b).r)]+' high)'};
+  if(straight&&flush)   return{rank:8,name:'Straight Flush',tiebreak};
+  if(counts[0]===4)     return{rank:7,name:'Four of a Kind',tiebreak};
+  if(counts[0]===3&&counts[1]===2)return{rank:6,name:'Full House',tiebreak};
+  if(flush)             return{rank:5,name:'Flush',tiebreak};
+  if(straight)          return{rank:4,name:'Straight',tiebreak};
+  if(counts[0]===3)     return{rank:3,name:'Three of a Kind',tiebreak};
+  if(counts[0]===2&&counts[1]===2)return{rank:2,name:'Two Pair',tiebreak};
+  if(counts[0]===2)     return{rank:1,name:'One Pair',tiebreak};
+  const highCard=cards.reduce((a,b)=>a.v>b.v?a:b);
+  return{rank:0,name:'High Card ('+highCard.r+' high)',tiebreak};
+}
+
+// compare two evaluated hands — 1 if a wins, -1 if b wins, 0 if true tie
+function compareHands(a,b){
+  if(a.rank!==b.rank) return a.rank>b.rank?1:-1;
+  for(let i=0;i<Math.max(a.tiebreak.length,b.tiebreak.length);i++){
+    const av=a.tiebreak[i]||0, bv=b.tiebreak[i]||0;
+    if(av!==bv) return av>bv?1:-1;
+  }
+  return 0;
 }
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
@@ -350,27 +365,22 @@ $('action-btn').addEventListener('click',()=>{
 
 function showResult(){
   const [p1,p2]=players;
-  let winner, loser, tie=false;
-  if(p1.hand.rank>p2.hand.rank){winner=p1;loser=p2;}
-  else if(p2.hand.rank>p1.hand.rank){winner=p2;loser=p1;}
-  else{tie=true;}
-
-  $('winner-name').textContent=tie?'It\'s a Tie!':winner.name+' Wins!';
+  const cmp=compareHands(p1.hand,p2.hand);
+  const tie=cmp===0;
+  const winner=cmp>0?p1:p2;
+  const loser=cmp>0?p2:p1;
+  $('winner-name').textContent=tie?"It's a Tie!":winner.name+" Wins!";
   $('winner-sub').textContent=tie
-    ?`Both got ${p1.hand.name}`
+    ?`Both got ${p1.hand.name} — identical strength`
     :`${winner.hand.name} beats ${loser.hand.name}`;
-
-  // Sort by rank descending
-  const sorted=[...players].sort((a,b)=>b.hand.rank-a.hand.rank);
-  $('score-rows').innerHTML=sorted.map((p,i)=>`
-    <div class="score-row ${(!tie&&p===winner)?'winner':''}">
+  const sorted=[...players].sort((a,b)=>compareHands(b.hand,a.hand));
+  $('score-rows').innerHTML=sorted.map((p)=>`
+    <div class="score-row ${(!tie&&p===winner)?"winner":""}">
       <div>
-        <div class="sr-name">${(!tie&&p===winner)?'🏆 ':''}${p.name}</div>
+        <div class="sr-name">${(!tie&&p===winner)?"🏆 ":""}${p.name}</div>
         <div class="sr-hand">${p.hand.name}</div>
       </div>
-      <div class="sr-rank">Rank ${p.hand.rank}</div>
     </div>`).join('');
-
   show('result');
 }
 
